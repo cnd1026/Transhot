@@ -9,6 +9,7 @@ env/
 .env
 .env.*
 
+config/settings.json
 output/
 logs/
 temp/

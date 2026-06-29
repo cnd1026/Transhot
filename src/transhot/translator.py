@@ -3,13 +3,14 @@ import os
 from openai import OpenAI
 
 from transhot.models import TextRegion, TranslatedRegion
+from transhot.settings import get_openai_api_key
 
 
 class OpenAiTranslator:
     def __init__(self, model: str = "gpt-4o-mini") -> None:
-        api_key = os.getenv("OPENAI_API_KEY")
+        api_key = os.getenv("OPENAI_API_KEY") or get_openai_api_key()
         if not api_key:
-            raise RuntimeError("OPENAI_API_KEY 환경 변수가 설정되어 있지 않습니다.")
+            raise RuntimeError("OpenAI API Key가 설정되어 있지 않습니다.")
 
         self._client = OpenAI(api_key=api_key)
         self._model = model

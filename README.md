@@ -19,7 +19,9 @@ pip install -r requirements.txt
 pip install -e .
 ```
 
-OpenAI API 키를 환경 변수로 설정합니다.
+OpenAI API 키는 앱의 `API Key` 버튼에서 저장할 수 있습니다. 저장된 값은 `config/settings.json`에 기록되며 Git에는 커밋되지 않습니다.
+
+환경 변수로도 설정할 수 있습니다.
 
 ```powershell
 $env:OPENAI_API_KEY="sk-..."

@@ -7,9 +7,13 @@ from zipfile import BadZipFile
 from PySide6.QtCore import QObject, Qt, QThread, Signal
 from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import (
+    QDialog,
+    QDialogButtonBox,
     QFileDialog,
+    QFormLayout,
     QHBoxLayout,
     QLabel,
+    QLineEdit,
     QMainWindow,
     QMessageBox,
     QPushButton,
@@ -21,11 +25,40 @@ from PySide6.QtWidgets import (
 from transhot.image_renderer import ImageRenderer
 from transhot.ocr import EasyOcrService
 from transhot.processing_logger import ProcessingLogger
+from transhot.settings import AppSettings, SettingsStore
 from transhot.translator import OpenAiTranslator
 from transhot.zip_processor import compress, extract, find_images
 
 
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp"}
+
+
+class SettingsDialog(QDialog):
+    def __init__(self, settings_store: SettingsStore, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setWindowTitle("Settings")
+        self._settings_store = settings_store
+
+        settings = self._settings_store.load()
+        self._api_key_input = QLineEdit(settings.openai_api_key)
+        self._api_key_input.setEchoMode(QLineEdit.Password)
+        self._api_key_input.setMinimumWidth(360)
+
+        form_layout = QFormLayout()
+        form_layout.addRow("OpenAI API Key", self._api_key_input)
+
+        self._buttons = QDialogButtonBox(QDialogButtonBox.Save | QDialogButtonBox.Cancel)
+        self._buttons.accepted.connect(self._save)
+        self._buttons.rejected.connect(self.reject)
+
+        layout = QVBoxLayout()
+        layout.addLayout(form_layout)
+        layout.addWidget(self._buttons)
+        self.setLayout(layout)
+
+    def _save(self) -> None:
+        self._settings_store.save(AppSettings(openai_api_key=self._api_key_input.text().strip()))
+        self.accept()
 
 
 class Worker(QObject):
@@ -140,10 +173,14 @@ class MainWindow(QMainWindow):
         self._output_dir = Path.cwd() / "output"
         self._temp_root = Path.cwd() / "temp"
         self._logger = ProcessingLogger(Path.cwd() / "logs")
+        self._settings_store = SettingsStore()
+        self._settings_store.ensure_exists()
 
         self._status_label = QLabel("이미지 파일을 선택하세요.")
         self._select_button = QPushButton("이미지 선택 및 번역")
         self._select_button.clicked.connect(self._select_image)
+        self._settings_button = QPushButton("API Key")
+        self._settings_button.clicked.connect(self._open_settings)
 
         self._preview_label = QLabel("번역 완료 후 결과 이미지가 여기에 표시됩니다.")
         self._preview_label.setAlignment(Qt.AlignCenter)
@@ -166,11 +203,15 @@ class MainWindow(QMainWindow):
         self._log_text.setReadOnly(True)
         self._log_text.setMinimumHeight(140)
 
+        action_layout = QHBoxLayout()
+        action_layout.addWidget(self._select_button)
+        action_layout.addWidget(self._settings_button)
+        action_layout.addWidget(self._open_output_button)
+
         layout = QVBoxLayout()
         layout.addWidget(self._status_label)
         layout.addWidget(self._preview_label, stretch=1)
-        layout.addWidget(self._select_button)
-        layout.addWidget(self._open_output_button)
+        layout.addLayout(action_layout)
         layout.addLayout(log_header_layout)
         layout.addWidget(self._log_text)
 
@@ -188,7 +229,24 @@ class MainWindow(QMainWindow):
         if not file_name:
             return
 
+        if not self._has_api_key():
+            QMessageBox.warning(
+                self,
+                "API Key 필요",
+                "OpenAI API Key가 설정되어 있지 않습니다.\nAPI Key 버튼을 눌러 먼저 저장해주세요.",
+            )
+            self._open_settings()
+            return
+
         self._start_processing(Path(file_name))
+
+    def _open_settings(self) -> None:
+        dialog = SettingsDialog(self._settings_store, self)
+        if dialog.exec() == QDialog.Accepted:
+            QMessageBox.information(self, "저장 완료", "OpenAI API Key를 저장했습니다.")
+
+    def _has_api_key(self) -> bool:
+        return bool(os.getenv("OPENAI_API_KEY") or self._settings_store.load().openai_api_key.strip())
 
     def _start_processing(self, image_path: Path) -> None:
         self.clear_log()
