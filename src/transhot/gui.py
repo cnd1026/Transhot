@@ -31,6 +31,9 @@ from transhot.zip_processor import compress, extract, find_images
 
 
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp"}
+SUPPORTED_EXTENSIONS = IMAGE_EXTENSIONS | {".zip"}
+DEFAULT_PREVIEW_TEXT = "Select or drag an image/ZIP file to start."
+DROP_PREVIEW_TEXT = "Drop image or ZIP file here"
 
 
 class SettingsDialog(QDialog):
@@ -167,6 +170,7 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.setWindowTitle("Transhot MVP")
         self.setMinimumSize(640, 520)
+        self.setAcceptDrops(True)
         self._thread: QThread | None = None
         self._worker: Worker | None = None
         self._last_output_path: Path | None = None
@@ -182,7 +186,7 @@ class MainWindow(QMainWindow):
         self._settings_button = QPushButton("API Key")
         self._settings_button.clicked.connect(self._open_settings)
 
-        self._preview_label = QLabel("번역 완료 후 결과 이미지가 여기에 표시됩니다.")
+        self._preview_label = QLabel(DEFAULT_PREVIEW_TEXT)
         self._preview_label.setAlignment(Qt.AlignCenter)
         self._preview_label.setMinimumSize(560, 360)
         self._preview_label.setStyleSheet("border: 1px solid #cccccc; background: #fafafa;")
@@ -229,6 +233,17 @@ class MainWindow(QMainWindow):
         if not file_name:
             return
 
+        self._handle_input_path(Path(file_name))
+
+    def _handle_input_path(self, input_path: Path) -> None:
+        if self._worker is not None:
+            self.append_log("ERROR: Processing is already running.")
+            return
+
+        if not self._is_supported_file(input_path):
+            self.append_log(f"ERROR: Unsupported file type: {input_path.name}")
+            return
+
         if not self._has_api_key():
             QMessageBox.warning(
                 self,
@@ -238,7 +253,7 @@ class MainWindow(QMainWindow):
             self._open_settings()
             return
 
-        self._start_processing(Path(file_name))
+        self._start_processing(input_path)
 
     def _open_settings(self) -> None:
         dialog = SettingsDialog(self._settings_store, self)
@@ -248,12 +263,16 @@ class MainWindow(QMainWindow):
     def _has_api_key(self) -> bool:
         return bool(os.getenv("OPENAI_API_KEY") or self._settings_store.load().openai_api_key.strip())
 
+    def _is_supported_file(self, path: Path) -> bool:
+        return path.is_file() and path.suffix.lower() in SUPPORTED_EXTENSIONS
+
     def _start_processing(self, image_path: Path) -> None:
         self.clear_log()
         self._logger.start_new_run()
         self._select_button.setEnabled(False)
         self._open_output_button.setEnabled(False)
         self._status_label.setText("OCR 및 번역 처리 중입니다. 첫 실행은 시간이 걸릴 수 있습니다.")
+        self._preview_label.setText("Processing...")
 
         self._thread = QThread()
         temp_dir = self._temp_root / datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -324,6 +343,56 @@ class MainWindow(QMainWindow):
         super().resizeEvent(event)
         if self._last_output_path and self._last_output_path.suffix.lower() in IMAGE_EXTENSIONS:
             self._show_preview(self._last_output_path)
+
+    def dragEnterEvent(self, event) -> None:
+        if event.mimeData().hasUrls():
+            event.acceptProposedAction()
+            self._preview_label.setText(DROP_PREVIEW_TEXT)
+            return
+        event.ignore()
+
+    def dragMoveEvent(self, event) -> None:
+        if event.mimeData().hasUrls():
+            event.acceptProposedAction()
+            return
+        event.ignore()
+
+    def dragLeaveEvent(self, event) -> None:
+        self._restore_preview_after_drop()
+        super().dragLeaveEvent(event)
+
+    def dropEvent(self, event) -> None:
+        paths = [
+            Path(url.toLocalFile())
+            for url in event.mimeData().urls()
+            if url.isLocalFile()
+        ]
+        supported_paths = [path for path in paths if self._is_supported_file(path)]
+
+        if not supported_paths:
+            for path in paths:
+                self.append_log(f"ERROR: Unsupported file type: {path.name}")
+            if not paths:
+                self.append_log("ERROR: Unsupported file type: dropped item")
+            self._restore_preview_after_drop()
+            event.acceptProposedAction()
+            return
+
+        if len(paths) > 1:
+            self.append_log("Multiple files dropped. Processing first supported file only.")
+
+        self._handle_input_path(supported_paths[0])
+        if self._worker is None:
+            self._restore_preview_after_drop()
+        event.acceptProposedAction()
+
+    def _restore_preview_after_drop(self) -> None:
+        if self._last_output_path is None:
+            self._preview_label.setText(DEFAULT_PREVIEW_TEXT)
+        elif self._last_output_path.suffix.lower() in IMAGE_EXTENSIONS:
+            self._show_preview(self._last_output_path)
+        else:
+            self._preview_label.setText(f"ZIP 결과 저장 완료:\n{self._last_output_path}")
 
     def _cleanup_worker(self) -> None:
         self._worker = None
