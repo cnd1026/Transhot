@@ -34,6 +34,7 @@ python main.py
 ```
 
 EasyOCR은 첫 실행 시 모델 파일을 다운로드할 수 있습니다.
+Windows 한글 경로나 특수문자 경로의 이미지도 안정적으로 처리하도록 Pillow 기반 이미지 로딩을 사용합니다.
 
 ## Windows 빌드
 
