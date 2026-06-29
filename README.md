@@ -34,3 +34,17 @@ python main.py
 ```
 
 EasyOCR은 첫 실행 시 모델 파일을 다운로드할 수 있습니다.
+
+## Windows 빌드
+
+PyInstaller로 폴더형 실행 파일을 만들 수 있습니다.
+
+```powershell
+.\build_windows.bat
+```
+
+빌드가 성공하면 `dist/Transhot/Transhot.exe`가 생성됩니다. `dist/Transhot/Transhot.exe`를 실행해 GUI가 열리는지 확인하세요.
+
+빌드 결과물에는 `config/settings.example.json`이 포함됩니다. 실제 API Key가 저장되는 `config/settings.json`은 Git에 커밋되지 않으며, 빌드 산출물에 포함되지 않습니다.
+
+프로젝트에 `fonts/` 폴더가 있으면 빌드 결과물에도 함께 포함됩니다.

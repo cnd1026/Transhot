@@ -13,6 +13,7 @@ dependencies = [
     "easyocr>=1.7.1",
     "openai>=1.40.0",
     "numpy>=1.26.0",
+    "pyinstaller>=6.0.0",
 ]
 
 [tool.setuptools.packages.find]
