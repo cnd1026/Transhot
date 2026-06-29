@@ -21,6 +21,9 @@ pip install -e .
 ```
 
 OpenAI API 키는 앱의 `API Key` 버튼에서 저장할 수 있습니다. 저장된 값은 `config/settings.json`에 기록되며 Git에는 커밋되지 않습니다.
+같은 설정 창에서 번역 엔진을 `Google Free Test` 또는 `OpenAI`로 선택할 수 있습니다.
+
+`Google Free Test`는 API Key 없이 빠른 테스트용으로 사용할 수 있습니다. 공식 Google Cloud Translation API가 아니므로 안정성을 보장하지 않습니다. 정식 사용/배포 단계에서는 OpenAI 또는 공식 번역 API 사용을 권장합니다.
 
 환경 변수로도 설정할 수 있습니다.
 

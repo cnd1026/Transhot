@@ -17,6 +17,7 @@ from PySide6.QtWidgets import (
     QMainWindow,
     QMessageBox,
     QPushButton,
+    QComboBox,
     QTextEdit,
     QVBoxLayout,
     QWidget,
@@ -27,7 +28,7 @@ from transhot.ocr import EasyOcrService
 from transhot.output_paths import make_unique_output_path
 from transhot.processing_logger import ProcessingLogger
 from transhot.settings import AppSettings, SettingsStore
-from transhot.translator import OpenAiTranslator, TranslationError
+from transhot.translator import OpenAiTranslator, TranslationError, get_translation_provider_label
 from transhot.zip_processor import compress, extract, find_images
 
 
@@ -48,7 +49,14 @@ class SettingsDialog(QDialog):
         self._api_key_input.setEchoMode(QLineEdit.Password)
         self._api_key_input.setMinimumWidth(360)
 
+        self._provider_input = QComboBox()
+        self._provider_input.addItem("Google Free Test", "google_free")
+        self._provider_input.addItem("OpenAI", "openai")
+        provider_index = self._provider_input.findData(settings.translation_provider)
+        self._provider_input.setCurrentIndex(max(0, provider_index))
+
         form_layout = QFormLayout()
+        form_layout.addRow("Translation Provider", self._provider_input)
         form_layout.addRow("OpenAI API Key", self._api_key_input)
 
         self._buttons = QDialogButtonBox(QDialogButtonBox.Save | QDialogButtonBox.Cancel)
@@ -61,7 +69,12 @@ class SettingsDialog(QDialog):
         self.setLayout(layout)
 
     def _save(self) -> None:
-        self._settings_store.save(AppSettings(openai_api_key=self._api_key_input.text().strip()))
+        self._settings_store.save(
+            AppSettings(
+                openai_api_key=self._api_key_input.text().strip(),
+                translation_provider=str(self._provider_input.currentData()),
+            )
+        )
         self.accept()
 
 
@@ -95,7 +108,10 @@ class Worker(QObject):
             self.log_message.emit("ERROR: ZIP 파일이 손상되었거나 읽을 수 없습니다.")
             self.failed.emit("ZIP 파일이 손상되었거나 읽을 수 없습니다.")
         except TranslationError as exc:
-            self.log_message.emit(f"ERROR: Translation failed for text: {exc.source_text}")
+            if exc.provider == "google_free":
+                self.log_message.emit(f"ERROR: Google Free translation failed for text: {exc.source_text}")
+            else:
+                self.log_message.emit(f"ERROR: Translation failed for text: {exc.source_text}")
             self.log_message.emit(f"ERROR: {exc.original_error}")
             self.failed.emit(str(exc.original_error))
         except Exception as exc:
@@ -141,7 +157,10 @@ class Worker(QObject):
             try:
                 self._process_image(image_path, image_output_dir, log_output_path=False)
             except TranslationError as exc:
-                self.log_message.emit(f"ERROR: Translation failed for text: {exc.source_text}")
+                if exc.provider == "google_free":
+                    self.log_message.emit(f"ERROR: Google Free translation failed for text: {exc.source_text}")
+                else:
+                    self.log_message.emit(f"ERROR: Translation failed for text: {exc.source_text}")
                 self.log_message.emit(f"ERROR: {exc.original_error}")
                 self.log_message.emit(f"ERROR: Skipping {image_path.relative_to(input_dir)}")
             except Exception as exc:
@@ -165,6 +184,7 @@ class Worker(QObject):
 
     def _translate_regions(self, regions):
         self.log_message.emit("Translation started")
+        self.log_message.emit(f"Translation provider: {get_translation_provider_label()}")
         translator = self._get_translator()
         translated_regions = []
         total_regions = len(regions)
@@ -297,7 +317,10 @@ class MainWindow(QMainWindow):
             QMessageBox.information(self, "저장 완료", "OpenAI API Key를 저장했습니다.")
 
     def _has_api_key(self) -> bool:
-        return bool(os.getenv("OPENAI_API_KEY") or self._settings_store.load().openai_api_key.strip())
+        settings = self._settings_store.load()
+        if settings.translation_provider != "openai":
+            return True
+        return bool(os.getenv("OPENAI_API_KEY") or settings.openai_api_key.strip())
 
     def _is_supported_file(self, path: Path) -> bool:
         return path.is_file() and path.suffix.lower() in SUPPORTED_EXTENSIONS

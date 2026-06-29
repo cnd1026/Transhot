@@ -6,11 +6,14 @@ from typing import Any
 
 SETTINGS_DIR = Path.cwd() / "config"
 SETTINGS_PATH = SETTINGS_DIR / "settings.json"
+DEFAULT_TRANSLATION_PROVIDER = "google_free"
+SUPPORTED_TRANSLATION_PROVIDERS = {"openai", "google_free"}
 
 
 @dataclass(frozen=True)
 class AppSettings:
     openai_api_key: str = ""
+    translation_provider: str = DEFAULT_TRANSLATION_PROVIDER
 
 
 class SettingsStore:
@@ -32,11 +35,20 @@ class SettingsStore:
         self.ensure_exists()
         with self._settings_path.open("r", encoding="utf-8") as file:
             data: dict[str, Any] = json.load(file)
-        return AppSettings(openai_api_key=str(data.get("openai_api_key", "")))
+        provider = str(data.get("translation_provider", DEFAULT_TRANSLATION_PROVIDER))
+        if provider not in SUPPORTED_TRANSLATION_PROVIDERS:
+            provider = DEFAULT_TRANSLATION_PROVIDER
+        return AppSettings(
+            openai_api_key=str(data.get("openai_api_key", "")),
+            translation_provider=provider,
+        )
 
     def save(self, settings: AppSettings) -> None:
         self._settings_path.parent.mkdir(parents=True, exist_ok=True)
-        payload = {"openai_api_key": settings.openai_api_key}
+        payload = {
+            "openai_api_key": settings.openai_api_key,
+            "translation_provider": settings.translation_provider,
+        }
         with self._settings_path.open("w", encoding="utf-8") as file:
             json.dump(payload, file, indent=2, ensure_ascii=False)
             file.write("\n")
@@ -44,3 +56,7 @@ class SettingsStore:
 
 def get_openai_api_key() -> str:
     return SettingsStore().load().openai_api_key.strip()
+
+
+def get_translation_provider() -> str:
+    return SettingsStore().load().translation_provider
