@@ -2,6 +2,7 @@ import os
 from datetime import datetime
 from html import escape
 from pathlib import Path
+from zipfile import BadZipFile
 
 from PySide6.QtCore import QObject, Qt, QThread, Signal
 from PySide6.QtGui import QPixmap
@@ -21,6 +22,10 @@ from transhot.image_renderer import ImageRenderer
 from transhot.ocr import EasyOcrService
 from transhot.processing_logger import ProcessingLogger
 from transhot.translator import OpenAiTranslator
+from transhot.zip_processor import compress, extract, find_images
+
+
+IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp"}
 
 
 class Worker(QObject):
@@ -28,26 +33,68 @@ class Worker(QObject):
     failed = Signal(str)
     log_message = Signal(str)
 
-    def __init__(self, image_path: Path, output_dir: Path) -> None:
+    def __init__(self, input_path: Path, output_dir: Path, temp_dir: Path) -> None:
         super().__init__()
-        self._image_path = image_path
+        self._input_path = input_path
         self._output_dir = output_dir
+        self._temp_dir = temp_dir
+        self._ocr_service = EasyOcrService()
+        self._renderer = ImageRenderer()
+        self._translator: OpenAiTranslator | None = None
 
     def run(self) -> None:
         try:
-            self.log_message.emit("Image loaded")
-            regions = self._extract_regions()
-            translated_regions = self._translate_regions(regions)
-            output_path = self._render_output(translated_regions)
+            if self._input_path.suffix.lower() == ".zip":
+                output_path = self._process_zip()
+            else:
+                output_path = self._process_image(self._input_path, self._output_dir)
             self.log_message.emit("Completed")
             self.finished.emit(str(output_path))
+        except BadZipFile:
+            self.log_message.emit("ERROR: ZIP 파일이 손상되었거나 읽을 수 없습니다.")
+            self.failed.emit("ZIP 파일이 손상되었거나 읽을 수 없습니다.")
         except Exception as exc:
             self.log_message.emit(f"ERROR: {exc}")
             self.failed.emit(str(exc))
 
-    def _extract_regions(self):
+    def _process_image(self, image_path: Path, output_dir: Path) -> Path:
+        self.log_message.emit("Image loaded")
+        regions = self._extract_regions(image_path)
+        translated_regions = self._translate_regions(regions)
+        return self._render_output(image_path, translated_regions, output_dir)
+
+    def _process_zip(self) -> Path:
+        self.log_message.emit("ZIP detected.")
+        input_dir = self._temp_dir / "input"
+        temp_output_dir = self._temp_dir / "output"
+        temp_output_dir.mkdir(parents=True, exist_ok=True)
+
+        self.log_message.emit("Extracting...")
+        extract(self._input_path, input_dir)
+
+        image_paths = find_images(input_dir)
+        total_images = len(image_paths)
+        if total_images == 0:
+            raise RuntimeError("ZIP 파일 안에서 지원하는 이미지 파일을 찾지 못했습니다.")
+
+        for index, image_path in enumerate(image_paths, start=1):
+            self.log_message.emit(f"Image {index} / {total_images}")
+            relative_parent = image_path.relative_to(input_dir).parent
+            image_output_dir = temp_output_dir / relative_parent
+            try:
+                self._process_image(image_path, image_output_dir)
+            except Exception as exc:
+                self.log_message.emit(f"ERROR: Skipping {image_path.relative_to(input_dir)} - {exc}")
+
+        self.log_message.emit("Compressing...")
+        zip_output_path = self._output_dir / f"Translated_{self._input_path.stem}.zip"
+        compress(temp_output_dir, zip_output_path)
+        self.log_message.emit("ZIP completed.")
+        return zip_output_path
+
+    def _extract_regions(self, image_path: Path):
         self.log_message.emit("OCR started.")
-        regions = EasyOcrService().extract(self._image_path)
+        regions = self._ocr_service.extract(image_path)
         self.log_message.emit("OCR finished")
         self.log_message.emit(f"Detected {len(regions)} text regions")
         if not regions:
@@ -56,7 +103,7 @@ class Worker(QObject):
 
     def _translate_regions(self, regions):
         self.log_message.emit("Translation started")
-        translator = OpenAiTranslator()
+        translator = self._get_translator()
         translated_regions = []
         total_regions = len(regions)
         for index, region in enumerate(regions, start=1):
@@ -65,16 +112,21 @@ class Worker(QObject):
         self.log_message.emit("Translation finished")
         return translated_regions
 
-    def _render_output(self, translated_regions):
+    def _render_output(self, image_path: Path, translated_regions, output_dir: Path):
         self.log_message.emit("Rendering started")
         self.log_message.emit("Saving output...")
-        output_path = ImageRenderer().render(
-            self._image_path,
+        output_path = self._renderer.render(
+            image_path,
             translated_regions,
-            self._output_dir,
+            output_dir,
         )
         self.log_message.emit("Rendering finished")
         return output_path
+
+    def _get_translator(self) -> OpenAiTranslator:
+        if self._translator is None:
+            self._translator = OpenAiTranslator()
+        return self._translator
 
 
 class MainWindow(QMainWindow):
@@ -86,6 +138,7 @@ class MainWindow(QMainWindow):
         self._worker: Worker | None = None
         self._last_output_path: Path | None = None
         self._output_dir = Path.cwd() / "output"
+        self._temp_root = Path.cwd() / "temp"
         self._logger = ProcessingLogger(Path.cwd() / "logs")
 
         self._status_label = QLabel("이미지 파일을 선택하세요.")
@@ -128,9 +181,9 @@ class MainWindow(QMainWindow):
     def _select_image(self) -> None:
         file_name, _ = QFileDialog.getOpenFileName(
             self,
-            "이미지 선택",
+            "이미지 또는 ZIP 선택",
             "",
-            "Images (*.jpg *.jpeg *.png *.webp)",
+            "Supported Files (*.jpg *.jpeg *.png *.webp *.zip)",
         )
         if not file_name:
             return
@@ -145,7 +198,8 @@ class MainWindow(QMainWindow):
         self._status_label.setText("OCR 및 번역 처리 중입니다. 첫 실행은 시간이 걸릴 수 있습니다.")
 
         self._thread = QThread()
-        self._worker = Worker(image_path, self._output_dir)
+        temp_dir = self._temp_root / datetime.now().strftime("%Y%m%d_%H%M%S")
+        self._worker = Worker(image_path, self._output_dir, temp_dir)
         self._worker.moveToThread(self._thread)
 
         self._thread.started.connect(self._worker.run)
@@ -162,7 +216,10 @@ class MainWindow(QMainWindow):
         self._select_button.setEnabled(True)
         self._open_output_button.setEnabled(True)
         self._status_label.setText(f"완료: {output_path}")
-        self._show_preview(self._last_output_path)
+        if self._last_output_path.suffix.lower() in IMAGE_EXTENSIONS:
+            self._show_preview(self._last_output_path)
+        else:
+            self._preview_label.setText(f"ZIP 결과 저장 완료:\n{output_path}")
         self.append_log("Processing completed successfully.")
         QMessageBox.information(self, "완료", f"결과 이미지를 저장했습니다.\n{output_path}")
         self._cleanup_worker()
@@ -207,7 +264,7 @@ class MainWindow(QMainWindow):
 
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
-        if self._last_output_path:
+        if self._last_output_path and self._last_output_path.suffix.lower() in IMAGE_EXTENSIONS:
             self._show_preview(self._last_output_path)
 
     def _cleanup_worker(self) -> None:

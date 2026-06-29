@@ -11,6 +11,7 @@ env/
 
 output/
 logs/
+temp/
 
 *.egg-info/
 build/
