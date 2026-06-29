@@ -27,7 +27,7 @@ from transhot.ocr import EasyOcrService
 from transhot.output_paths import make_unique_output_path
 from transhot.processing_logger import ProcessingLogger
 from transhot.settings import AppSettings, SettingsStore
-from transhot.translator import OpenAiTranslator
+from transhot.translator import OpenAiTranslator, TranslationError
 from transhot.zip_processor import compress, extract, find_images
 
 
@@ -94,6 +94,10 @@ class Worker(QObject):
         except BadZipFile:
             self.log_message.emit("ERROR: ZIP 파일이 손상되었거나 읽을 수 없습니다.")
             self.failed.emit("ZIP 파일이 손상되었거나 읽을 수 없습니다.")
+        except TranslationError as exc:
+            self.log_message.emit(f"ERROR: Translation failed for text: {exc.source_text}")
+            self.log_message.emit(f"ERROR: {exc.original_error}")
+            self.failed.emit(str(exc.original_error))
         except Exception as exc:
             self.log_message.emit(f"ERROR: {exc}")
             self.failed.emit(str(exc))
@@ -136,6 +140,10 @@ class Worker(QObject):
             image_output_dir = temp_output_dir / relative_parent
             try:
                 self._process_image(image_path, image_output_dir, log_output_path=False)
+            except TranslationError as exc:
+                self.log_message.emit(f"ERROR: Translation failed for text: {exc.source_text}")
+                self.log_message.emit(f"ERROR: {exc.original_error}")
+                self.log_message.emit(f"ERROR: Skipping {image_path.relative_to(input_dir)}")
             except Exception as exc:
                 self.log_message.emit(f"ERROR: Skipping {image_path.relative_to(input_dir)} - {exc}")
 

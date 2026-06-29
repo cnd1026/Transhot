@@ -38,7 +38,7 @@ class SettingsStore:
         self._settings_path.parent.mkdir(parents=True, exist_ok=True)
         payload = {"openai_api_key": settings.openai_api_key}
         with self._settings_path.open("w", encoding="utf-8") as file:
-            json.dump(payload, file, indent=2)
+            json.dump(payload, file, indent=2, ensure_ascii=False)
             file.write("\n")
 
 

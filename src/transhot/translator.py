@@ -6,6 +6,13 @@ from transhot.models import TextRegion, TranslatedRegion
 from transhot.settings import get_openai_api_key
 
 
+class TranslationError(RuntimeError):
+    def __init__(self, source_text: str, original_error: Exception) -> None:
+        super().__init__(str(original_error))
+        self.source_text = source_text
+        self.original_error = original_error
+
+
 class OpenAiTranslator:
     def __init__(self, model: str = "gpt-4o-mini") -> None:
         api_key = os.getenv("OPENAI_API_KEY") or get_openai_api_key()
@@ -19,7 +26,10 @@ class OpenAiTranslator:
         translated: list[TranslatedRegion] = []
 
         for region in regions:
-            translated_text = self._translate(region.text)
+            try:
+                translated_text = self._translate(str(region.text))
+            except Exception as exc:
+                raise TranslationError(str(region.text), exc) from exc
             translated.append(
                 TranslatedRegion(
                     original=region.text,
