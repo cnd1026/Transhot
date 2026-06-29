@@ -24,6 +24,7 @@ from PySide6.QtWidgets import (
 
 from transhot.image_renderer import ImageRenderer
 from transhot.ocr import EasyOcrService
+from transhot.output_paths import make_unique_output_path
 from transhot.processing_logger import ProcessingLogger
 from transhot.settings import AppSettings, SettingsStore
 from transhot.translator import OpenAiTranslator
@@ -83,7 +84,11 @@ class Worker(QObject):
             if self._input_path.suffix.lower() == ".zip":
                 output_path = self._process_zip()
             else:
-                output_path = self._process_image(self._input_path, self._output_dir)
+                output_path = self._process_image(
+                    self._input_path,
+                    self._input_path.parent,
+                    make_unique_output_path(self._input_path),
+                )
             self.log_message.emit("Completed")
             self.finished.emit(str(output_path))
         except BadZipFile:
@@ -93,11 +98,23 @@ class Worker(QObject):
             self.log_message.emit(f"ERROR: {exc}")
             self.failed.emit(str(exc))
 
-    def _process_image(self, image_path: Path, output_dir: Path) -> Path:
+    def _process_image(
+        self,
+        image_path: Path,
+        output_dir: Path,
+        output_path: Path | None = None,
+        log_output_path: bool = True,
+    ) -> Path:
         self.log_message.emit("Image loaded")
         regions = self._extract_regions(image_path)
         translated_regions = self._translate_regions(regions)
-        return self._render_output(image_path, translated_regions, output_dir)
+        return self._render_output(
+            image_path,
+            translated_regions,
+            output_dir,
+            output_path,
+            log_output_path,
+        )
 
     def _process_zip(self) -> Path:
         self.log_message.emit("ZIP detected.")
@@ -118,13 +135,14 @@ class Worker(QObject):
             relative_parent = image_path.relative_to(input_dir).parent
             image_output_dir = temp_output_dir / relative_parent
             try:
-                self._process_image(image_path, image_output_dir)
+                self._process_image(image_path, image_output_dir, log_output_path=False)
             except Exception as exc:
                 self.log_message.emit(f"ERROR: Skipping {image_path.relative_to(input_dir)} - {exc}")
 
         self.log_message.emit("Compressing...")
-        zip_output_path = self._output_dir / f"Translated_{self._input_path.stem}.zip"
+        zip_output_path = make_unique_output_path(self._input_path)
         compress(temp_output_dir, zip_output_path)
+        self.log_message.emit(f"Output saved: {zip_output_path}")
         self.log_message.emit("ZIP completed.")
         return zip_output_path
 
@@ -148,14 +166,24 @@ class Worker(QObject):
         self.log_message.emit("Translation finished")
         return translated_regions
 
-    def _render_output(self, image_path: Path, translated_regions, output_dir: Path):
+    def _render_output(
+        self,
+        image_path: Path,
+        translated_regions,
+        output_dir: Path,
+        output_path: Path | None = None,
+        log_output_path: bool = True,
+    ):
         self.log_message.emit("Rendering started")
         self.log_message.emit("Saving output...")
         output_path = self._renderer.render(
             image_path,
             translated_regions,
             output_dir,
+            output_path,
         )
+        if log_output_path:
+            self.log_message.emit(f"Output saved: {output_path}")
         self.log_message.emit("Rendering finished")
         return output_path
 
@@ -336,8 +364,9 @@ class MainWindow(QMainWindow):
         self._preview_label.setPixmap(scaled)
 
     def _open_output_folder(self) -> None:
-        self._output_dir.mkdir(parents=True, exist_ok=True)
-        os.startfile(self._output_dir)
+        output_folder = self._last_output_path.parent if self._last_output_path else self._output_dir
+        output_folder.mkdir(parents=True, exist_ok=True)
+        os.startfile(output_folder)
 
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)

@@ -1,9 +1,10 @@
 # Transhot MVP
 
-Windows에서 이미지 1장 또는 ZIP 파일을 선택해 OCR 텍스트를 한국어로 번역한 뒤, 원문 영역을 흰색으로 덮고 번역문을 넣어 `output` 폴더에 저장하는 Python GUI MVP입니다.
+Windows에서 이미지 1장 또는 ZIP 파일을 선택해 OCR 텍스트를 한국어로 번역한 뒤, 원문 영역을 흰색으로 덮고 번역문을 넣어 원본 파일과 같은 폴더에 저장하는 Python GUI MVP입니다.
 처리 진행 상황은 앱 하단의 Processing Log에서 확인할 수 있으며, 작업별 로그 파일은 `logs` 폴더에 저장됩니다.
 
-ZIP 파일을 선택하면 `temp/<timestamp>/input`에 압축을 해제하고 내부 이미지(`jpg`, `jpeg`, `png`, `webp`)를 폴더 구조 그대로 처리한 뒤, `output/Translated_<원본파일명>.zip`으로 다시 저장합니다.
+ZIP 파일을 선택하면 `temp/<timestamp>/input`에 압축을 해제하고 내부 이미지(`jpg`, `jpeg`, `png`, `webp`)를 폴더 구조 그대로 처리한 뒤, 원본 ZIP과 같은 폴더에 `re_<원본파일명>.zip`으로 다시 저장합니다.
+이미지 결과도 원본 이미지와 같은 폴더에 `re_<원본파일명>` 형식으로 저장되며, 같은 이름이 있으면 `_1`, `_2` 번호가 자동으로 붙습니다.
 
 ## 설치
 

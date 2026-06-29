@@ -14,6 +14,7 @@ class ImageRenderer:
         image_path: Path,
         regions: list[TranslatedRegion],
         output_dir: Path,
+        output_path: Path | None = None,
     ) -> Path:
         output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -23,7 +24,8 @@ class ImageRenderer:
         for region in regions:
             self._paint_region(draw, region)
 
-        output_path = output_dir / f"{image_path.stem}_translated{image_path.suffix}"
+        output_path = output_path or output_dir / f"{image_path.stem}_translated{image_path.suffix}"
+        output_path.parent.mkdir(parents=True, exist_ok=True)
         image.save(output_path)
         return output_path
 
